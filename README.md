@@ -1,1 +1,0 @@
-# redpanda-client-examples
