@@ -81,7 +81,7 @@
                 <configuration>
                     <archive>
                         <manifest>
-                            <mainClass>com.redpanda.proto.ProtobufExample</mainClass>
+                            <mainClass>com.redpanda.ProtobufExample</mainClass>
                         </manifest>
                     </archive>
                     <descriptorRefs>

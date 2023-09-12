@@ -23,7 +23,8 @@ curl -X DELETE -u "${REDPANDA_USERNAME}:${REDPANDA_PASSWORD}" \
 
 ```shell
 mvn clean compile assembly:single
-java -jar target/protobuf-example-1.0.0-jar-with-dependencies.jar \
+java -cp target/protobuf-example-1.0.0-jar-with-dependencies.jar \
+    com.redpanda.ProtobufExample \
     -s "${REDPANDA_BROKERS}" \
     -r "${REDPANDA_SCHEMA_REGISTRY}" \
     -u "${REDPANDA_USERNAME}" -p "${REDPANDA_PASSWORD}"
