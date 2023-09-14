@@ -85,7 +85,7 @@ public abstract class ClientExample {
         final AdminClient admin = AdminClient.create(properties);
         try {
             admin.deleteTopics(Collections.singletonList(topic));
-            final NewTopic newTopic = new NewTopic(topic, Optional.empty(), Optional.empty());
+            final NewTopic newTopic = new NewTopic(topic, Optional.of(3), Optional.empty());
             admin.createTopics(Collections.singletonList(newTopic));
         } finally {
             admin.close();

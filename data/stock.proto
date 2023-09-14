@@ -1,5 +1,5 @@
 syntax = "proto3";
-package com.redpanda;
+package com.redpanda.proto;
 
 message NasdaqHistorical {
     string date   = 1;

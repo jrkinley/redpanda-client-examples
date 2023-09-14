@@ -1,13 +1,24 @@
 package com.redpanda;
 
 import java.io.BufferedReader;
+import java.io.File;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.net.URISyntaxException;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Properties;
+
+import org.apache.avro.Schema;
+import org.apache.avro.Schema.Parser;
+import org.apache.avro.generic.GenericData;
+import org.apache.avro.generic.GenericRecord;
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
 import org.apache.commons.cli.DefaultParser;
@@ -22,29 +33,43 @@ import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
 
-import com.redpanda.proto.Stock.NasdaqHistorical;
+import io.confluent.kafka.serializers.KafkaAvroDeserializer;
+import io.confluent.kafka.serializers.KafkaAvroSerializer;
 
-import io.confluent.kafka.serializers.protobuf.KafkaProtobufDeserializer;
-import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer;
+public class AvroExample extends ClientExample {
+    private static String SCHEMA_AVSC = "stock.avsc";
+    private static String DEFAULT_TOPIC = "nasdaq_historical_avro";
 
-/*
- * Compile .proto to generate classes:
- * protoc -I=../data/ --java_out=src/main/java/ ../data/stock.proto
- */
-public class ProtobufExample extends ClientExample {
-    private static String DEFAULT_TOPIC = "nasdaq_historical_proto";
-
-    ProtobufExample(Properties props, String topic) {
+    AvroExample(Properties props, String topic) {
         super(props, topic);
+    }
+
+    private String getSchema() {
+        StringBuilder schema = new StringBuilder();
+        InputStream is = AvroExample.class.getClassLoader().getResourceAsStream(SCHEMA_AVSC);
+        InputStreamReader sr = new InputStreamReader(is, StandardCharsets.UTF_8);
+        try (BufferedReader reader = new BufferedReader(sr)) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                schema.append(line);
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        System.out.printf("Schema: %s", schema.toString());
+        return schema.toString();
     }
 
     @Override
     protected void produce(String filename) {
-        final KafkaProducer<String, NasdaqHistorical> producer = new KafkaProducer<String, NasdaqHistorical>(
-                properties);
+        String nasdaqSchema = getSchema();
+        Parser parser = new Parser();
+        Schema schema = parser.parse(nasdaqSchema);
+
+        final KafkaProducer<String, GenericRecord> producer = new KafkaProducer<String, GenericRecord>(properties);
         String symbol = getSymbol(filename);
         try {
-            InputStream is = ProtobufExample.class.getClassLoader().getResourceAsStream(filename);
+            InputStream is = AvroExample.class.getClassLoader().getResourceAsStream(filename);
             InputStreamReader sr = new InputStreamReader(is, StandardCharsets.UTF_8);
             BufferedReader reader = new BufferedReader(sr);
             reader.readLine(); // Ignore header
@@ -57,15 +82,16 @@ public class ProtobufExample extends ClientExample {
                 } catch (NumberFormatException e) {
                     e.printStackTrace();
                 }
-                NasdaqHistorical stock = NasdaqHistorical.newBuilder()
-                        .setDate(parts[0])
-                        .setLast(parts[1])
-                        .setVolume(volume)
-                        .setOpen(parts[3])
-                        .setHigh(parts[4])
-                        .setLow(parts[5])
-                        .build();
-                ProducerRecord<String, NasdaqHistorical> record = new ProducerRecord<String, NasdaqHistorical>(
+
+                GenericRecord stock = new GenericData.Record(schema);
+                stock.put("date", parts[0]);
+                stock.put("last", parts[1]);
+                stock.put("volume", volume);
+                stock.put("open", parts[3]);
+                stock.put("high", parts[4]);
+                stock.put("low", parts[5]);
+
+                ProducerRecord<String, GenericRecord> record = new ProducerRecord<String, GenericRecord>(
                         topic, symbol, stock);
                 producer.send(record, new Callback() {
                     @Override
@@ -92,16 +118,15 @@ public class ProtobufExample extends ClientExample {
 
     @Override
     protected void consume() {
-        final KafkaConsumer<String, NasdaqHistorical> consumer = new KafkaConsumer<String, NasdaqHistorical>(
-                properties);
+        final KafkaConsumer<String, GenericRecord> consumer = new KafkaConsumer<String, GenericRecord>(properties);
         consumer.subscribe(Arrays.asList(topic));
         try {
             while (true) {
-                ConsumerRecords<String, NasdaqHistorical> records = consumer.poll(Duration.ofMillis(30000));
+                ConsumerRecords<String, GenericRecord> records = consumer.poll(Duration.ofMillis(30000));
                 if (records.isEmpty()) {
                     break;
                 }
-                for (ConsumerRecord<String, NasdaqHistorical> record : records) {
+                for (ConsumerRecord<String, GenericRecord> record : records) {
                     System.out.printf("Consumed: [Topic: %s \tPartition: %d \tOffset: %d \tKey: %s]%n",
                             record.topic(), record.partition(), record.offset(), record.key());
                 }
@@ -116,7 +141,7 @@ public class ProtobufExample extends ClientExample {
     }
 
     public static void main(String[] args) throws InterruptedException {
-        Options options = ProtobufExample.getOptions();
+        Options options = AvroExample.getOptions();
 
         CommandLineParser parser = new DefaultParser();
         HelpFormatter formatter = new HelpFormatter();
@@ -128,15 +153,14 @@ public class ProtobufExample extends ClientExample {
             formatter.printHelp("redpanda-examples", options);
             System.exit(1);
         }
-        Properties props = ProtobufExample.getProperties(cmd);
+        Properties props = AvroExample.getProperties(cmd);
 
-        // Additional properties for Protobuf
-        props.put("value.serializer", KafkaProtobufSerializer.class.getName());
-        props.put("value.deserializer", KafkaProtobufDeserializer.class.getName());
-        props.put("specific.protobuf.value.type", NasdaqHistorical.class);
+        // Additional properties for Avro
+        props.put("value.serializer", KafkaAvroSerializer.class.getName());
+        props.put("value.deserializer", KafkaAvroDeserializer.class.getName());
 
         final String topic = cmd.getOptionValue("topic", DEFAULT_TOPIC);
-        ProtobufExample client = new ProtobufExample(props, topic);
+        AvroExample client = new AvroExample(props, topic);
         client.createTopic();
 
         List<Thread> producers = client.write();
